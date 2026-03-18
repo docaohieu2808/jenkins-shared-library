@@ -37,24 +37,74 @@ def call(Map config, Map args = [:]) {
 
         case 'ssh-build':
             // SSH → git pull → build on server → atomic swap → restart service
+            // Supports: shallow clone, env vars, prod deps, build verification, backup rotation, rollback
             if (!host) { error "deploy.hosts.${environment} not set in .ci.yml" }
             def appDir = config.deploy?.path ?: "/opt/${env.JOB_BASE_NAME}"
             def branch = config.deploy?.branch ?: (environment == 'production' ? 'main' : 'develop')
             def buildCmd = config.deploy?.buildCommand ?: 'npm install && npm run build'
             def service = config.deploy?.service ?: env.JOB_BASE_NAME
             def distDir = config.deploy?.distDir ?: 'dist'
+            def backupCount = config.deploy?.backupCount ?: 2
+            def gitDepth = config.deploy?.gitDepth ?: 0  // 0 = full clone, >0 = shallow
+            def prodDepsCommand = config.deploy?.prodDepsCommand ?: ''  // e.g. 'npm install --omit=dev'
+            def verifyCommand = config.deploy?.verifyCommand ?: ''  // e.g. 'test $(find dist -name "*.html" | wc -l) -ge 100'
+            def envVars = config.deploy?.envVars ?: [:]  // e.g. [STRAPI_URL: 'https://...']
+
+            // Build env export string
+            def envExport = ''
+            envVars.each { k, v -> envExport += "export ${k}='${v}' && " }
+
+            // Build git pull command (shallow or full)
+            def gitPull = gitDepth > 0
+                ? "git fetch --depth=${gitDepth} origin ${branch} && git checkout FETCH_HEAD"
+                : "git fetch origin && git checkout ${branch} && git pull origin ${branch}"
+
             sh """
                 ssh -o StrictHostKeyChecking=no ${host} '
+                    set -e
                     cd ${appDir} &&
-                    git fetch origin &&
-                    git checkout ${branch} &&
-                    git pull origin ${branch} &&
-                    ${buildCmd} &&
-                    if [ -d ${distDir}_old ]; then rm -rf ${distDir}_old; fi &&
-                    if [ -d ${distDir}_current ]; then mv ${distDir}_current ${distDir}_old; fi &&
+
+                    # 1. Git pull
+                    ${gitPull} &&
+
+                    # 2. Build with env vars
+                    ${envExport}${buildCmd} &&
+
+                    # 3. Verify build output
+                    ${verifyCommand ? "${verifyCommand} || { echo \"BUILD VERIFICATION FAILED\"; exit 1; } &&" : ''}
+
+                    # 4. Install prod-only deps into dist if configured
+                    ${prodDepsCommand ? "${prodDepsCommand} &&" : ''}
+
+                    # 5. Backup rotation: keep last ${backupCount} backups
+                    for old_backup in \\$(ls -dt ${distDir}_backup_* 2>/dev/null | tail -n +${backupCount}); do
+                        rm -rf "\\$old_backup"
+                    done &&
+
+                    # 6. Backup current
+                    if [ -d ${distDir}_current ]; then
+                        mv ${distDir}_current ${distDir}_backup_\\$(date +%Y%m%d_%H%M%S)
+                    fi &&
+
+                    # 7. Atomic swap
                     mv ${distDir} ${distDir}_current &&
                     ln -sfn ${distDir}_current ${distDir} &&
-                    sudo systemctl restart ${service}
+
+                    # 8. Restart service + rollback on failure
+                    if sudo systemctl restart ${service}; then
+                        echo "Deploy successful"
+                    else
+                        echo "SERVICE RESTART FAILED — rolling back" &&
+                        latest_backup=\\$(ls -dt ${distDir}_backup_* 2>/dev/null | head -1) &&
+                        if [ -n "\\$latest_backup" ]; then
+                            rm -rf ${distDir}_current &&
+                            mv "\\$latest_backup" ${distDir}_current &&
+                            ln -sfn ${distDir}_current ${distDir} &&
+                            sudo systemctl restart ${service} &&
+                            echo "Rollback complete"
+                        fi &&
+                        exit 1
+                    fi
                 '
             """
             break
