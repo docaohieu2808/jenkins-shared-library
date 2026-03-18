@@ -66,7 +66,11 @@ def call(Map overrides = [:]) {
             stage('Deploy Production') {
                 when { branch 'main' }
                 steps {
-                    input message: 'Deploy to production?', ok: 'Deploy'
+                    script {
+                        if (config.deploy?.autoApprove != true) {
+                            input message: 'Deploy to production?', ok: 'Deploy'
+                        }
+                    }
                     deployStage(config, env: 'production')
                 }
             }
