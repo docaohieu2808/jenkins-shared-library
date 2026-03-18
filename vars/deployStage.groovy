@@ -68,6 +68,43 @@ def call(Map config, Map args = [:]) {
             """
             break
 
+        case 's3-cloudfront':
+            // Build output → S3 → invalidate CloudFront cache
+            def bucket = config.deploy?.bucket ?: error("deploy.bucket not set in .ci.yml")
+            def distDir = config.deploy?.distDir ?: 'dist'
+            def distributionId = config.deploy?.distributionId ?: ''
+            def region = config.deploy?.region ?: 'ap-southeast-1'
+            sh "aws s3 sync ${distDir}/ s3://${bucket}/ --delete --region ${region}"
+            if (distributionId) {
+                sh "aws cloudfront create-invalidation --distribution-id ${distributionId} --paths '/*'"
+            }
+            break
+
+        case 'rsync':
+            // Rsync build output to server
+            if (!host) { error "deploy.hosts.${environment} not set in .ci.yml" }
+            def distDir = config.deploy?.distDir ?: 'dist'
+            def remotePath = config.deploy?.path ?: "/var/www/${env.JOB_BASE_NAME}"
+            def extraArgs = config.deploy?.rsyncArgs ?: ''
+            sh "rsync -avz --delete ${extraArgs} ${distDir}/ ${host}:${remotePath}/"
+            // Optional: restart service after rsync
+            if (config.deploy?.service) {
+                sh "ssh -o StrictHostKeyChecking=no ${host} 'sudo systemctl restart ${config.deploy.service}'"
+            }
+            break
+
+        case 'docker-swarm':
+            // Docker stack deploy
+            if (!host) { error "deploy.hosts.${environment} not set in .ci.yml" }
+            def stackName = config.deploy?.stack ?: env.JOB_BASE_NAME
+            def composeFile = config.deploy?.composeFile ?: 'docker-compose.yml'
+            sh """
+                ssh -o StrictHostKeyChecking=no ${host} '
+                    docker stack deploy -c ${composeFile} ${stackName} --with-registry-auth
+                '
+            """
+            break
+
         case 'script':
             // Run custom deploy script from project
             def script = config.deploy?.script ?: './deploy.sh'
