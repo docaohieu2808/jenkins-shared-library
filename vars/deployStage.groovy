@@ -35,6 +35,30 @@ def call(Map config, Map args = [:]) {
             sh "ssh -o StrictHostKeyChecking=no ${host} '${command}'"
             break
 
+        case 'ssh-build':
+            // SSH → git pull → build on server → atomic swap → restart service
+            if (!host) { error "deploy.hosts.${environment} not set in .ci.yml" }
+            def appDir = config.deploy?.path ?: "/opt/${env.JOB_BASE_NAME}"
+            def branch = config.deploy?.branch ?: (environment == 'production' ? 'main' : 'develop')
+            def buildCmd = config.deploy?.buildCommand ?: 'npm install && npm run build'
+            def service = config.deploy?.service ?: env.JOB_BASE_NAME
+            def distDir = config.deploy?.distDir ?: 'dist'
+            sh """
+                ssh -o StrictHostKeyChecking=no ${host} '
+                    cd ${appDir} &&
+                    git fetch origin &&
+                    git checkout ${branch} &&
+                    git pull origin ${branch} &&
+                    ${buildCmd} &&
+                    if [ -d ${distDir}_old ]; then rm -rf ${distDir}_old; fi &&
+                    if [ -d ${distDir}_current ]; then mv ${distDir}_current ${distDir}_old; fi &&
+                    mv ${distDir} ${distDir}_current &&
+                    ln -sfn ${distDir}_current ${distDir} &&
+                    sudo systemctl restart ${service}
+                '
+            """
+            break
+
         case 'ecs':
             sh """
                 aws ecs update-service \

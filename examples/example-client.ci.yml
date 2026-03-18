@@ -1,17 +1,17 @@
-# .ci.yml — Drop this file into example-client repo root
-# Only override what differs from defaults. Everything else is auto-detected.
+# .ci.yml — Drop this into example-client repo root
+# Auto-detected: Node.js project (package.json)
+# Only override deploy config, everything else is auto-detected.
 
 deploy:
-  target: docker-compose
+  target: ssh-build
+  path: /opt/example-client        # app directory on server
+  branch: main                            # git branch to pull
+  buildCommand: npm install && npm run build
+  distDir: dist                           # build output directory
+  service: example-client           # systemd service name
   hosts:
-    staging: user@staging-server
-    production: user@production-server
-  path: /opt/example-client
+    staging: deployer@staging-server       # ← change to your staging host
+    production: deployer@production-server # ← change to your production host
 
 notifications:
-  slack: '#example-client-builds'
-  # webhook: https://discord.com/api/webhooks/xxx  # optional
-
-# Uncomment to enable
-# sonar: true
-# security: false
+  slack: '#example-client-builds'              # ← change or remove
