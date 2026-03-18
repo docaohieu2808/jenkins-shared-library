@@ -1,0 +1,17 @@
+# .ci.yml — Drop this file into wellington-decorators repo root
+# Only override what differs from defaults. Everything else is auto-detected.
+
+deploy:
+  target: docker-compose
+  hosts:
+    staging: user@staging-server
+    production: user@production-server
+  path: /opt/wellington-decorators
+
+notifications:
+  slack: '#wellington-builds'
+  # webhook: https://discord.com/api/webhooks/xxx  # optional
+
+# Uncomment to enable
+# sonar: true
+# security: false
