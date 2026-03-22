@@ -2,13 +2,18 @@ import org.pipeline.ProjectDetector
 import org.pipeline.ConfigLoader
 
 def call(Map overrides = [:]) {
-    // 1. Auto-detect project type
-    def detector = new ProjectDetector(this)
-    def detected = detector.detect()
+    // 1. Auto-detect project type (needs node context for fileExists)
+    def detected
+    def config
+    node {
+        checkout scm
+        def detector = new ProjectDetector(this)
+        detected = detector.detect()
 
-    // 2. Load config: defaults → detected → .ci.yml → overrides
-    def loader = new ConfigLoader(this)
-    def config = loader.load(detected, overrides)
+        // 2. Load config: defaults → detected → .ci.yml → overrides
+        def loader = new ConfigLoader(this)
+        config = loader.load(detected, overrides)
+    }
 
     echo "=== Auto Pipeline ==="
     echo "Language: ${config.language} | Framework: ${config.framework} | Build: ${config.buildTool}"
