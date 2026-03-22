@@ -4,7 +4,7 @@ def call(Map config) {
     switch (config.language) {
         case 'node':
             def cmd = [yarn: 'yarn', pnpm: 'pnpm', bun: 'bun'][config.buildTool] ?: 'npm'
-            def install = cmd == 'npm' ? 'npm ci' : "${cmd} install"
+            def install = cmd == 'npm' ? 'npm ci --prefer-offline 2>/dev/null || npm install' : "${cmd} install"
             sh "${install} && ${cmd} run build --if-present"
             break
 
