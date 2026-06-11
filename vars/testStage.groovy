@@ -14,13 +14,13 @@ def call(Map config, Map args = [:]) {
 
         case 'java':
             if (type == 'lint') {
-                sh config.buildTool == 'gradle'
+                sh(config.buildTool == 'gradle'
                     ? './gradlew checkstyleMain || true'
-                    : 'mvn checkstyle:check -B || true'
+                    : 'mvn checkstyle:check -B || true')
             } else {
-                sh config.buildTool == 'gradle'
+                sh(config.buildTool == 'gradle'
                     ? './gradlew test'
-                    : 'mvn test -B'
+                    : 'mvn test -B')
             }
             break
 

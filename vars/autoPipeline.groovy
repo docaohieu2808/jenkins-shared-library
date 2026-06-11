@@ -39,11 +39,11 @@ def call(Map overrides = [:]) {
             stage('Test') {
                 parallel {
                     stage('Unit Test') {
-                        steps { testStage(config, type: 'unit') }
+                        steps { testStage(config, [type: 'unit']) }
                     }
                     stage('Lint') {
                         when { expression { config.lint != false } }
-                        steps { testStage(config, type: 'lint') }
+                        steps { testStage(config, [type: 'lint']) }
                     }
                 }
             }
@@ -65,7 +65,7 @@ def call(Map overrides = [:]) {
 
             stage('Deploy Staging') {
                 when { branch 'develop' }
-                steps { deployStage(config, env: 'staging') }
+                steps { deployStage(config, [env: 'staging']) }
             }
 
             stage('Deploy Production') {
@@ -76,14 +76,14 @@ def call(Map overrides = [:]) {
                             input message: 'Deploy to production?', ok: 'Deploy'
                         }
                     }
-                    deployStage(config, env: 'production')
+                    deployStage(config, [env: 'production'])
                 }
             }
         }
 
         post {
-            success { notifyStage(config, status: 'SUCCESS') }
-            failure { notifyStage(config, status: 'FAILURE') }
+            success { notifyStage(config, [status: 'SUCCESS']) }
+            failure { notifyStage(config, [status: 'FAILURE']) }
             always  { cleanWs() }
         }
     }
