@@ -9,8 +9,11 @@ def call(Map config, Map args = [:]) {
         case 'docker-compose':
             if (!host) { error "deploy.hosts.${environment} not set in .ci.yml" }
             def appDir = config.deploy?.path ?: "/opt/${env.JOB_BASE_NAME}"
+            // Provision known_hosts on the Jenkins agent before deploy:
+            //   ssh-keyscan -H <host> >> ~/.ssh/known_hosts
+            // For automated provisioning use the SSH Agent plugin with a pre-seeded known_hosts volume.
             sh """
-                ssh -o StrictHostKeyChecking=no ${host} '
+                ssh -o StrictHostKeyChecking=accept-new ${host} '
                     cd ${appDir} &&
                     docker compose pull &&
                     docker compose up -d --remove-orphans
@@ -32,7 +35,9 @@ def call(Map config, Map args = [:]) {
         case 'ssh':
             if (!host) { error "deploy.hosts.${environment} not set in .ci.yml" }
             def command = config.deploy?.command ?: 'echo "No deploy command configured"'
-            sh "ssh -o StrictHostKeyChecking=no ${host} '${command}'"
+            // Provision known_hosts on the Jenkins agent before deploy:
+            //   ssh-keyscan -H <host> >> ~/.ssh/known_hosts
+            sh "ssh -o StrictHostKeyChecking=accept-new ${host} '${command}'"
             break
 
         case 'ssh-build':
@@ -59,8 +64,10 @@ def call(Map config, Map args = [:]) {
                 ? "git fetch --depth=${gitDepth} origin ${branch} && git checkout FETCH_HEAD"
                 : "git fetch origin && git checkout ${branch} && git pull origin ${branch}"
 
+            // Provision known_hosts on the Jenkins agent before deploy:
+            //   ssh-keyscan -H <host> >> ~/.ssh/known_hosts
             sh """
-                ssh -o StrictHostKeyChecking=no ${host} '
+                ssh -o StrictHostKeyChecking=accept-new ${host} '
                     set -e
                     cd ${appDir} &&
 
@@ -139,7 +146,7 @@ def call(Map config, Map args = [:]) {
             sh "rsync -avz --delete ${extraArgs} ${distDir}/ ${host}:${remotePath}/"
             // Optional: restart service after rsync
             if (config.deploy?.service) {
-                sh "ssh -o StrictHostKeyChecking=no ${host} 'sudo systemctl restart ${config.deploy.service}'"
+                sh "ssh -o StrictHostKeyChecking=accept-new ${host} 'sudo systemctl restart ${config.deploy.service}'"
             }
             break
 
@@ -148,8 +155,10 @@ def call(Map config, Map args = [:]) {
             if (!host) { error "deploy.hosts.${environment} not set in .ci.yml" }
             def stackName = config.deploy?.stack ?: env.JOB_BASE_NAME
             def composeFile = config.deploy?.composeFile ?: 'docker-compose.yml'
+            // Provision known_hosts on the Jenkins agent before deploy:
+            //   ssh-keyscan -H <host> >> ~/.ssh/known_hosts
             sh """
-                ssh -o StrictHostKeyChecking=no ${host} '
+                ssh -o StrictHostKeyChecking=accept-new ${host} '
                     docker stack deploy -c ${composeFile} ${stackName} --with-registry-auth
                 '
             """
