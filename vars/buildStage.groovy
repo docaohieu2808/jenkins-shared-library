@@ -19,10 +19,14 @@ def call(Map config) {
         case 'python':
             if (config.buildTool == 'poetry') {
                 sh 'poetry install --no-interaction'
+            } else if (config.buildTool == 'uv') {
+                sh 'uv sync --frozen'
             } else if (config.buildTool == 'pipenv') {
                 sh 'pipenv install --deploy'
-            } else {
+            } else if (fileExists('requirements.txt')) {
                 sh 'pip install -r requirements.txt'
+            } else {
+                sh 'pip install .'
             }
             break
 
@@ -46,6 +50,6 @@ def call(Map config) {
             break
 
         default:
-            echo "Unknown language '${config.language}' — skipping build stage"
+            echo "Unknown language '${config.language}' - skipping build stage"
     }
 }

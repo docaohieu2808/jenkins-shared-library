@@ -1,0 +1,2 @@
+@Library('auto-pipeline') _
+autoPipeline()

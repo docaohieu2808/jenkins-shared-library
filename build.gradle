@@ -1,0 +1,43 @@
+// Unit tests for the library with JenkinsPipelineUnit. Run: gradle test (Java 21).
+plugins {
+    id 'groovy'
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.jenkins-ci.org/releases/' }
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+sourceSets {
+    main {
+        // src/org/pipeline/*.groovy is the library's class code; vars/ is loaded as scripts by the tests.
+        groovy { srcDirs = ['src'] }
+        resources { srcDirs = [] }
+    }
+    test {
+        groovy { srcDirs = ['test/groovy'] }
+        resources { srcDirs = [] }
+    }
+}
+
+dependencies {
+    // Same Groovy line Jenkins' pipeline engine uses.
+    implementation 'org.codehaus.groovy:groovy-all:2.4.21'
+    testImplementation 'com.lesfurets:jenkins-pipeline-unit:1.31'
+    testImplementation 'org.junit.jupiter:junit-jupiter:6.1.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:6.1.3'
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'PASSED', 'FAILED', 'SKIPPED'
+        exceptionFormat = 'full'
+        showStandardStreams = false
+    }
+}
