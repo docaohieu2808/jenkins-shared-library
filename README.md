@@ -116,10 +116,20 @@ ci/start-jenkins.sh    # needs Docker; then: ci/run-scm-job.sh node-pass /var/je
 - `lint`: yamllint, hadolint, actionlint, shellcheck.
 - `unit`: all tests above, including that every script in `vars/` compiles and that the real `ssh-build` command expands
   the backup name on the server, rotates backups, keeps `envVars` values byte for byte, aborts on a failed
-  verification without breaking the live build, and rolls back when the service restart fails.
-- `e2e`: a real Jenkins 2.580.1 (LTS) with this library registered runs `autoPipeline()` on two Node fixtures. The project
-  with passing tests must finish SUCCESS; the one with a deliberately failing test must finish FAILURE. The
-  zero-config run must skip the Docker and deploy stages.
+  verification without breaking the live build, and rolls back when the service restart fails. Most other
+  step tests only check the command string a stage generates (they use a fake `sh`); the stage-graph tests in
+  `AutoPipelineOrderingTest` run the real declarative `autoPipeline()` and assert behaviour: build, test, image
+  build, scan, push, deploy run in that order; a failing build, test or image scan stops every later stage (an
+  unscanned image is never pushed); a deploy stage runs only on its branch with its own host and never without a
+  `deploy.target`.
+- `e2e`: a real Jenkins 2.580.1 (LTS) with this library registered runs `autoPipeline()` on Node fixtures.
+  Passing tests must finish SUCCESS; a deliberately failing test must finish FAILURE. A plain Pipeline-from-SCM job
+  has no `BRANCH_NAME`, so every fixture Jenkinsfile sets it the way a multibranch job would, which makes the
+  `when { branch ... }` conditions really evaluate. The controller also runs a real sshd, and the `ssh` deploy
+  target deploys to it: `node-deploy-staging` (branch `develop`) must run the staging deploy and skip production,
+  `node-deploy-production` (branch `main`) the reverse, each proven by a marker file the remote command wrote,
+  `node-deploy-fail` (remote command exits 3) must go red, and `node-pass` (branch `develop`, no deploy config) must
+  skip the deploy stage because of the missing config.
 
 Actions are pinned to full commit SHAs and Dependabot covers actions, Gradle and the test image.
 

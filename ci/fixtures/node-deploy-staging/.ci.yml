@@ -1,0 +1,7 @@
+# Real deploy over ssh to the sshd inside the test controller.
+deploy:
+  target: ssh
+  hosts:
+    staging: jenkins@localhost
+    production: jenkins@localhost
+  command: echo staging-ran > /tmp/e2e-deploy-staging.marker

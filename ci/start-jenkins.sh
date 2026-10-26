@@ -21,6 +21,19 @@ for f in ci/fixtures/*/; do
   load_repo "$f" "/var/jenkins_home/fixtures/$(basename "$f")"
 done
 
+# A real sshd for the ssh deploy target: key login as the jenkins user to localhost. Keys are made at
+# start because /var/jenkins_home is a volume and build-time files there would be discarded.
+docker exec -u root jenkins usermod -p '*' jenkins
+docker exec -u jenkins jenkins bash -ec \
+  'mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519 &&
+   cp ~/.ssh/id_ed25519.pub ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
+docker exec -d -u root jenkins /usr/sbin/sshd -D -e
+for _ in $(seq 1 30); do
+  if docker exec -u jenkins jenkins ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new jenkins@localhost true; then break; fi
+  sleep 1
+done
+docker exec -u jenkins jenkins ssh -o BatchMode=yes jenkins@localhost true
+
 for _ in $(seq 1 90); do
   if curl -fsS -o /dev/null -u "admin:$pw" http://localhost:8080/whoAmI/api/json; then echo "Jenkins is up"; exit 0; fi
   sleep 2

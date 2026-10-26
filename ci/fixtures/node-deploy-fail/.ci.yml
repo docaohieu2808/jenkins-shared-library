@@ -1,0 +1,8 @@
+# The remote command fails: the build must go red at the deploy stage.
+deploy:
+  target: ssh
+  hosts:
+    staging: jenkins@localhost
+  command: |
+    echo about-to-fail
+    exit 3

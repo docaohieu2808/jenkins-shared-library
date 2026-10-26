@@ -1,2 +1,5 @@
+// Branch develop is "checked out" but no deploy.target is configured: the Deploy Staging stage must
+// be skipped because of the missing config, not because the branch does not match.
+env.BRANCH_NAME = 'develop'
 @Library('auto-pipeline') _
 autoPipeline()

@@ -1,0 +1,5 @@
+// A plain Pipeline-from-SCM job has no BRANCH_NAME, so the library's `when { branch ... }` could never be true.
+// Set it the way a multibranch job would, so the branch condition is really evaluated.
+env.BRANCH_NAME = 'main'
+@Library('auto-pipeline') _
+autoPipeline()

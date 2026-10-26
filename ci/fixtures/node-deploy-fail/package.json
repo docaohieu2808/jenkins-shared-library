@@ -1,0 +1,9 @@
+{
+  "name": "fixture-node-deploy-fail",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"console.log('built')\"",
+    "test": "node test.js"
+  }
+}

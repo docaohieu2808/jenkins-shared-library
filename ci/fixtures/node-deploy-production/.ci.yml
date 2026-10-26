@@ -1,0 +1,7 @@
+deploy:
+  target: ssh
+  autoApprove: true
+  hosts:
+    staging: jenkins@localhost
+    production: jenkins@localhost
+  command: echo production-ran > /tmp/e2e-deploy-production.marker
