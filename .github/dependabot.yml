@@ -12,3 +12,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Jenkins runs pipelines on Groovy 2.4; the tests must compile with the same line.
+      - dependency-name: "org.codehaus.groovy:groovy-all"
+        update-types: ["version-update:semver-major"]

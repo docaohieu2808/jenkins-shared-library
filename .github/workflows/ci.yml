@@ -72,7 +72,8 @@ jobs:
       - name: Build and start Jenkins, load the library and the fixtures
         run: ci/start-jenkins.sh
       - name: Passing project goes green
-        run: ci/run-scm-job.sh node-pass /var/jenkins_home/fixtures/node-pass SUCCESS "Language: node"
+        run: |
+          ci/run-scm-job.sh node-pass /var/jenkins_home/fixtures/node-pass SUCCESS "Language: node"
       - name: Project with a failing test goes red
         run: ci/run-scm-job.sh node-fail /var/jenkins_home/fixtures/node-fail FAILURE "AssertionError"
       - name: Zero-config run skipped what it should
