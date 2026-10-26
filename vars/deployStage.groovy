@@ -1,7 +1,12 @@
 def call(Map config, Map args = [:]) {
     def environment = args.env ?: 'staging'
-    def target = config.deploy?.target ?: 'docker-compose'
+    def target = config.deploy?.target
     def host = config.deploy?.hosts?."${environment}" ?: config.deploy?.host
+
+    if (!target) {
+        echo "No deploy.target configured - skipping deploy to ${environment}"
+        return
+    }
 
     echo "Deploying to ${environment} via ${target}..."
 
@@ -9,16 +14,15 @@ def call(Map config, Map args = [:]) {
         case 'docker-compose':
             if (!host) { error "deploy.hosts.${environment} not set in .ci.yml" }
             def appDir = config.deploy?.path ?: "/opt/${env.JOB_BASE_NAME}"
-            // Provision known_hosts on the Jenkins agent before deploy:
-            //   ssh-keyscan -H <host> >> ~/.ssh/known_hosts
-            // For automated provisioning use the SSH Agent plugin with a pre-seeded known_hosts volume.
-            sh """
-                ssh -o StrictHostKeyChecking=accept-new ${host} '
-                    cd ${appDir} &&
-                    docker compose pull &&
-                    docker compose up -d --remove-orphans
-                '
-            """
+            requireSafe('deploy host', host, 'host')
+            requireSafe('deploy.path', appDir, 'path')
+            // known_hosts must be provisioned on the Jenkins agent first (see README).
+            sh sshRun(host, """\
+                set -e
+                cd ${appDir}
+                docker compose pull
+                docker compose up -d --remove-orphans
+            """.stripIndent())
             break
 
         case 'k8s':
@@ -27,7 +31,7 @@ def call(Map config, Map args = [:]) {
             sh """
                 kubectl set image deployment/${deployment} \
                     app=${env.BUILT_IMAGE} \
-                    -n ${namespace} --record
+                    -n ${namespace}
                 kubectl rollout status deployment/${deployment} -n ${namespace} --timeout=300s
             """
             break
@@ -35,14 +39,14 @@ def call(Map config, Map args = [:]) {
         case 'ssh':
             if (!host) { error "deploy.hosts.${environment} not set in .ci.yml" }
             def command = config.deploy?.command ?: 'echo "No deploy command configured"'
-            // Provision known_hosts on the Jenkins agent before deploy:
-            //   ssh-keyscan -H <host> >> ~/.ssh/known_hosts
-            sh "ssh -o StrictHostKeyChecking=accept-new ${host} '${command}'"
+            requireSafe('deploy host', host, 'host')
+            // known_hosts must be provisioned on the Jenkins agent first (see README).
+            sh sshRun(host, command)
             break
 
         case 'ssh-build':
-            // SSH → git pull → build on server → atomic swap → restart service
-            // Supports: shallow clone, env vars, prod deps, build verification, backup rotation, rollback
+            // SSH -> git pull -> build on server -> atomic swap -> restart service, with rollback.
+            // Supports: shallow clone, env vars, prod deps, build verification, backup rotation.
             if (!host) { error "deploy.hosts.${environment} not set in .ci.yml" }
             def appDir = config.deploy?.path ?: "/opt/${env.JOB_BASE_NAME}"
             def branch = config.deploy?.branch ?: (environment == 'production' ? 'main' : 'develop')
@@ -55,65 +59,82 @@ def call(Map config, Map args = [:]) {
             def verifyCommand = config.deploy?.verifyCommand ?: ''  // e.g. 'test $(find dist -name "*.html" | wc -l) -ge 100'
             def envVars = config.deploy?.envVars ?: [:]  // e.g. [STRAPI_URL: 'https://...']
 
-            // Build env export string
-            def envExport = ''
-            envVars.each { k, v -> envExport += "export ${k}='${v}' && " }
+            requireSafe('deploy host', host, 'host')
+            requireSafe('deploy.path', appDir, 'path')
+            requireSafe('deploy.branch', branch, 'ref')
+            requireSafe('deploy.service', service, 'name')
+            requireSafe('deploy.distDir', distDir, 'name')
+            requireSafe('deploy.backupCount', backupCount.toString(), 'number')
+            requireSafe('deploy.gitDepth', gitDepth.toString(), 'number')
 
-            // Build git pull command (shallow or full)
-            def gitPull = gitDepth > 0
+            // Values are single-quoted for the remote shell; a quote inside a value is escaped.
+            def envExport = ''
+            envVars.each { k, v ->
+                requireSafe('deploy.envVars key', k.toString(), 'envname')
+                envExport += "export ${k}=" + shellQuote(v.toString()) + "\n"
+            }
+
+            def gitPull = gitDepth.toString() != '0'
                 ? "git fetch --depth=${gitDepth} origin ${branch} && git checkout FETCH_HEAD"
                 : "git fetch origin && git checkout ${branch} && git pull origin ${branch}"
 
-            // Provision known_hosts on the Jenkins agent before deploy:
-            //   ssh-keyscan -H <host> >> ~/.ssh/known_hosts
-            sh """
-                ssh -o StrictHostKeyChecking=accept-new ${host} '
-                    set -e
-                    cd ${appDir} &&
+            // The script is sent on stdin through a quoted heredoc: the remote shell receives it byte
+            // for byte, so `$(...)`, quotes and `$vars` below are evaluated on the server, not here.
+            def remoteScript = """\
+set -e
+cd ${appDir}
 
-                    # 1. Git pull
-                    ${gitPull} &&
+# 1. Git pull
+${gitPull}
 
-                    # 2. Build with env vars
-                    ${envExport}${buildCmd} &&
+# 2. Build with env vars. A previous deploy left ${distDir} as a symlink to the live build; the build
+#    needs a real directory, so drop the link and put it back if anything fails before the swap.
+had_link=0
+if [ -L ${distDir} ]; then rm ${distDir}; had_link=1; fi
+restore_live() {
+    if [ "\$had_link" = 1 ]; then rm -rf ${distDir}; ln -sfn ${distDir}_current ${distDir}; fi
+}
+trap restore_live EXIT
+${envExport}${buildCmd}
 
-                    # 3. Verify build output
-                    ${verifyCommand ? "${verifyCommand} || { echo \"BUILD VERIFICATION FAILED\"; exit 1; } &&" : ''}
+# 3. Verify build output
+${verifyCommand ? "${verifyCommand} || { echo 'BUILD VERIFICATION FAILED'; exit 1; }" : ':'}
 
-                    # 4. Install prod-only deps into dist if configured
-                    ${prodDepsCommand ? "${prodDepsCommand} &&" : ''}
+# 4. Install prod-only deps into dist if configured
+${prodDepsCommand ?: ':'}
 
-                    # 5. Backup rotation: keep last ${backupCount} backups
-                    for old_backup in \\$(ls -dt ${distDir}_backup_* 2>/dev/null | tail -n +${backupCount}); do
-                        rm -rf "\\$old_backup"
-                    done &&
+# 5. Backup rotation: keep the newest ${backupCount} backups once the new one is made
+for old_backup in \$(ls -dt ${distDir}_backup_* 2>/dev/null | tail -n +${backupCount}); do
+    rm -rf "\$old_backup"
+done
 
-                    # 6. Backup current
-                    if [ -d ${distDir}_current ]; then
-                        mv ${distDir}_current ${distDir}_backup_\\$(date +%Y%m%d_%H%M%S)
-                    fi &&
+# 6. Backup current
+if [ -d ${distDir}_current ]; then
+    mv ${distDir}_current ${distDir}_backup_\$(date +%Y%m%d_%H%M%S_%N)
+fi
 
-                    # 7. Atomic swap
-                    mv ${distDir} ${distDir}_current &&
-                    ln -sfn ${distDir}_current ${distDir} &&
+# 7. Atomic swap
+mv ${distDir} ${distDir}_current
+ln -sfn ${distDir}_current ${distDir}
+trap - EXIT
 
-                    # 8. Restart service + rollback on failure
-                    if sudo systemctl restart ${service}; then
-                        echo "Deploy successful"
-                    else
-                        echo "SERVICE RESTART FAILED — rolling back" &&
-                        latest_backup=\\$(ls -dt ${distDir}_backup_* 2>/dev/null | head -1) &&
-                        if [ -n "\\$latest_backup" ]; then
-                            rm -rf ${distDir}_current &&
-                            mv "\\$latest_backup" ${distDir}_current &&
-                            ln -sfn ${distDir}_current ${distDir} &&
-                            sudo systemctl restart ${service} &&
-                            echo "Rollback complete"
-                        fi &&
-                        exit 1
-                    fi
-                '
-            """
+# 8. Restart service, roll back on failure
+if sudo systemctl restart ${service}; then
+    echo "Deploy successful"
+else
+    echo "SERVICE RESTART FAILED - rolling back"
+    latest_backup=\$(ls -dt ${distDir}_backup_* 2>/dev/null | head -1)
+    if [ -n "\$latest_backup" ]; then
+        rm -rf ${distDir}_current
+        mv "\$latest_backup" ${distDir}_current
+        ln -sfn ${distDir}_current ${distDir}
+        sudo systemctl restart ${service}
+        echo "Rollback complete"
+    fi
+    exit 1
+fi
+"""
+            sh sshRun(host, remoteScript)
             break
 
         case 'ecs':
@@ -143,10 +164,14 @@ def call(Map config, Map args = [:]) {
             def distDir = config.deploy?.distDir ?: 'dist'
             def remotePath = config.deploy?.path ?: "/var/www/${env.JOB_BASE_NAME}"
             def extraArgs = config.deploy?.rsyncArgs ?: ''
+            requireSafe('deploy host', host, 'host')
+            requireSafe('deploy.path', remotePath, 'path')
+            requireSafe('deploy.distDir', distDir, 'name')
             sh "rsync -avz --delete ${extraArgs} ${distDir}/ ${host}:${remotePath}/"
             // Optional: restart service after rsync
             if (config.deploy?.service) {
-                sh "ssh -o StrictHostKeyChecking=accept-new ${host} 'sudo systemctl restart ${config.deploy.service}'"
+                requireSafe('deploy.service', config.deploy.service, 'name')
+                sh sshRun(host, "sudo systemctl restart ${config.deploy.service}")
             }
             break
 
@@ -155,13 +180,11 @@ def call(Map config, Map args = [:]) {
             if (!host) { error "deploy.hosts.${environment} not set in .ci.yml" }
             def stackName = config.deploy?.stack ?: env.JOB_BASE_NAME
             def composeFile = config.deploy?.composeFile ?: 'docker-compose.yml'
-            // Provision known_hosts on the Jenkins agent before deploy:
-            //   ssh-keyscan -H <host> >> ~/.ssh/known_hosts
-            sh """
-                ssh -o StrictHostKeyChecking=accept-new ${host} '
-                    docker stack deploy -c ${composeFile} ${stackName} --with-registry-auth
-                '
-            """
+            requireSafe('deploy host', host, 'host')
+            requireSafe('deploy.stack', stackName, 'name')
+            requireSafe('deploy.composeFile', composeFile, 'path')
+            // known_hosts must be provisioned on the Jenkins agent first (see README).
+            sh sshRun(host, "docker stack deploy -c ${composeFile} ${stackName} --with-registry-auth")
             break
 
         // === PaaS / Serverless ===
@@ -209,13 +232,15 @@ def call(Map config, Map args = [:]) {
             def serviceName = config.deploy?.service ?: env.JOB_BASE_NAME
             def region = config.deploy?.region ?: 'asia-southeast1'
             def image = env.BUILT_IMAGE ?: error("No Docker image built")
+            // Private by default; set deploy.allowUnauthenticated: true to make the service public.
+            def accessFlag = config.deploy?.allowUnauthenticated == true ? '--allow-unauthenticated' : '--no-allow-unauthenticated'
             sh """
                 gcloud run deploy ${serviceName} \
                     --image ${image} \
                     --project ${project} \
                     --region ${region} \
                     --platform managed \
-                    --allow-unauthenticated \
+                    ${accessFlag} \
                     --quiet
             """
             break
@@ -356,4 +381,32 @@ def call(Map config, Map args = [:]) {
         default:
             error "Unknown deploy target: ${target}. Available: docker-compose, k8s, ssh, ssh-build, ecs, s3-cloudfront, rsync, docker-swarm, vercel, netlify, aws-lambda, cloud-run, azure-app-service, helm, gitops, terraform, fly-io, railway, ansible, sftp, fastlane, script"
     }
+}
+
+// ---- helpers -------------------------------------------------------------------------------
+
+// Values from .ci.yml that end up unquoted in a shell command must look like what they claim to be.
+def requireSafe(String what, String value, String kind) {
+    def patterns = [
+        host   : '^[A-Za-z0-9_.@:\\[\\]-]+$',
+        path   : '^[A-Za-z0-9_./~-]+$',
+        ref    : '^[A-Za-z0-9_./-]+$',
+        name   : '^[A-Za-z0-9_.@-]+$',
+        number : '^[0-9]+$',
+        envname: '^[A-Za-z_][A-Za-z0-9_]*$',
+    ]
+    if (!(value ==~ patterns[kind])) {
+        error "${what} contains characters that are not allowed: '${value}'"
+    }
+}
+
+// Single-quote a value for a POSIX shell: a ' inside becomes '\''
+String shellQuote(String value) {
+    return "'" + value.replace("'", "'\\''") + "'"
+}
+
+// Run a script on a host: it travels on stdin through a quoted heredoc, so no quoting layer
+// between Jenkins and the remote shell can mangle it.
+String sshRun(String host, String script) {
+    return "ssh -o StrictHostKeyChecking=accept-new ${host} bash -s <<'REMOTE_SCRIPT'\n${script}\nREMOTE_SCRIPT"
 }

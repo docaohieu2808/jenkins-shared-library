@@ -52,7 +52,8 @@ class ProjectDetector implements Serializable {
         // --- Python ---
         else if (steps.fileExists('pyproject.toml') || steps.fileExists('requirements.txt')) {
             result.language = 'python'
-            result.buildTool = steps.fileExists('pyproject.toml') ? 'poetry' :
+            result.buildTool = steps.fileExists('poetry.lock') ? 'poetry' :
+                               steps.fileExists('uv.lock') ? 'uv' :
                                steps.fileExists('Pipfile') ? 'pipenv' : 'pip'
             if (steps.fileExists('manage.py'))         result.framework = 'django'
             else if (steps.fileExists('app/main.py'))  result.framework = 'fastapi'

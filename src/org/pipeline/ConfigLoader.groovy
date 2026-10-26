@@ -6,18 +6,21 @@ class ConfigLoader implements Serializable {
     ConfigLoader(steps) { this.steps = steps }
 
     /**
-     * Load config with priority: defaults → detected → .ci.yml → overrides
+     * Load config with priority: defaults -> detected -> .ci.yml -> overrides
      */
     Map load(Map detected, Map overrides = [:]) {
-        // Layer 1: library defaults
+        // Layer 1: library defaults. Nothing here may make a project without a .ci.yml fail:
+        // no deploy target means the deploy stages are skipped, notifications are off.
         def defaults = [
             timeout: 30,
             lint: true,
-            sonar: false,
+            sonar: false,          // true, or a map: [projectKey: 'x', server: 'sonarqube-server-name']
             security: true,
-            docker: null,  // auto-detect from Dockerfile
-            deploy: [target: 'docker-compose'],
-            notifications: [slack: '#ci-builds'],
+            securityFailOn: 'HIGH', // LOW | MEDIUM | HIGH | CRITICAL | NONE (NONE reports as UNSTABLE)
+            docker: null,          // auto-detect from Dockerfile
+            agentLabel: '',        // '' = any agent; e.g. 'node', 'python', 'docker' for jenkins-config agents
+            deploy: null,
+            notifications: [:],
         ]
 
         // Layer 2: merge detected info

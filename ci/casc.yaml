@@ -1,0 +1,24 @@
+jenkins:
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "admin"
+          password: "${JENKINS_ADMIN_PASSWORD}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+unclassified:
+  location:
+    url: "http://localhost:8080/"
+  globalLibraries:
+    libraries:
+      - name: "auto-pipeline"
+        defaultVersion: "master"
+        implicit: false
+        retriever:
+          modernSCM:
+            scm:
+              git:
+                remote: "file:///var/jenkins_home/library"

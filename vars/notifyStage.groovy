@@ -15,14 +15,18 @@ def call(Map config, Map args = [:]) {
         }
     }
 
-    // Generic webhook (Discord, Teams, etc.)
+    // Generic webhook (Discord, Teams, etc.). The JSON goes through a file and the URL through the
+    // environment so quotes in a job name cannot break the command.
     if (webhook) {
         try {
             def payload = groovy.json.JsonOutput.toJson([
                 text: message,
                 content: message  // Discord
             ])
-            sh "curl -s -X POST -H 'Content-Type: application/json' -d '${payload}' '${webhook}' || true"
+            writeFile file: 'notify-payload.json', text: payload
+            withEnv(["NOTIFY_WEBHOOK=${webhook}"]) {
+                sh 'curl -fsS -X POST -H "Content-Type: application/json" -d @notify-payload.json "$NOTIFY_WEBHOOK"'
+            }
         } catch (e) {
             echo "Webhook notification failed: ${e.message}"
         }

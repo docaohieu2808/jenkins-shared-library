@@ -1,0 +1,7 @@
+# Plugins the library's steps need (pinned for core 2.580.1). Keep in step with jenkins-config/plugins.txt.
+configuration-as-code:2136.veb_3a_554550b_f
+workflow-aggregator:608.v67378e9d3db_1
+git:5.11.0
+pipeline-utility-steps:3.810.va_7672d206740
+timestamper:1.30
+ws-cleanup:0.49

@@ -1,0 +1,19 @@
+# .ci.yml - drop into a project repo root.
+# Node.js project (package.json) that builds on the server and swaps the output atomically.
+# Only the deploy settings are overridden; everything else is detected.
+
+deploy:
+  target: ssh-build
+  path: /opt/my-site                       # app directory on the server
+  branch: main                             # branch to pull for production
+  buildCommand: npm install && npm run build
+  distDir: dist                            # build output directory
+  service: my-site                         # systemd service restarted after the swap
+  envVars:
+    API_URL: https://api.example.com       # exported for the build
+  hosts:
+    staging: deployer@staging.example.com
+    production: deployer@production.example.com
+
+notifications:
+  slack: '#my-team'                        # remove to turn notifications off

@@ -1,8 +1,0 @@
-timeout: 30
-lint: true
-sonar: false
-security: true
-docker: null
-deploy:
-  target: docker-compose
-notifications: {}

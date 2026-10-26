@@ -10,19 +10,19 @@ def call(Map overrides = [:]) {
         def detector = new ProjectDetector(this)
         detected = detector.detect()
 
-        // 2. Load config: defaults → detected → .ci.yml → overrides
+        // 2. Load config: defaults -> detected -> .ci.yml -> overrides
         def loader = new ConfigLoader(this)
         config = loader.load(detected, overrides)
     }
 
     echo "=== Auto Pipeline ==="
     echo "Language: ${config.language} | Framework: ${config.framework} | Build: ${config.buildTool}"
-    echo "Docker: ${config.docker} | Deploy: ${config.deploy?.target} | Sonar: ${config.sonar}"
+    echo "Docker: ${config.docker} | Deploy: ${config.deploy?.target ?: 'none'} | Sonar: ${config.sonar ? 'on' : 'off'}"
     echo "====================="
 
     // 3. Run pipeline
     pipeline {
-        agent any
+        agent { label "${config.agentLabel ?: ''}" }
 
         options {
             timeout(time: config.timeout as int, unit: 'MINUTES')
@@ -48,28 +48,40 @@ def call(Map overrides = [:]) {
                 }
             }
 
+            // Build the image first so the scan below has something to scan; push only after it passed.
+            stage('Docker Build') {
+                when { expression { config.docker == true } }
+                steps { dockerBuildPush(config, [action: 'build']) }
+            }
+
             stage('Security Scan') {
                 when { expression { config.security == true } }
                 steps { securityScan(config) }
             }
 
             stage('Sonar') {
-                when { expression { config.sonar == true } }
+                when { expression { config.sonar } }
                 steps { sonarScan(config) }
             }
 
-            stage('Docker Build & Push') {
+            stage('Docker Push') {
                 when { expression { config.docker == true } }
-                steps { dockerBuildPush(config) }
+                steps { dockerBuildPush(config, [action: 'push']) }
             }
 
             stage('Deploy Staging') {
-                when { branch 'develop' }
+                when {
+                    branch 'develop'
+                    expression { config.deploy?.target }
+                }
                 steps { deployStage(config, [env: 'staging']) }
             }
 
             stage('Deploy Production') {
-                when { branch 'main' }
+                when {
+                    branch 'main'
+                    expression { config.deploy?.target }
+                }
                 steps {
                     script {
                         if (config.deploy?.autoApprove != true) {
