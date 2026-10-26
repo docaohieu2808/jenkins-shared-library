@@ -11,7 +11,7 @@ class DockerAndNotifyTest extends StageTestBase {
         binding.getVariable('env').BRANCH_NAME = 'main'
         stage('dockerBuildPush').call(config(deploy: [registry: 'registry.example']), [action: 'build'])
         assertEquals(['docker build -t registry.example/my-app:main-7 .'], shellCommands)
-        assertEquals('registry.example/my-app:main-7', binding.getVariable('env').BUILT_IMAGE)
+        assertEquals('registry.example/my-app:main-7', binding.getVariable('env').BUILT_IMAGE.toString())
     }
 
     @Test
