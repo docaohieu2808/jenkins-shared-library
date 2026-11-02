@@ -1,7 +1,7 @@
 # Throwaway Jenkins for the end-to-end test: the same LTS line as jenkins-config, only the plugins the
 # library needs, and Node so the fixture projects can build on the controller (the library defaults to `agent any`),
 # and an sshd so the `ssh` deploy target deploys to a real host (started by ci/start-jenkins.sh).
-FROM jenkins/jenkins:2.580.1-lts-jdk21
+FROM jenkins/jenkins:2.580.2-lts-jdk21
 
 USER root
 # hadolint ignore=DL3008
